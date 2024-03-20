@@ -52,6 +52,7 @@ use League\Flysystem\FilesystemException;
 use League\Flysystem\Ftp\FtpAdapter;
 use League\Flysystem\Ftp\FtpConnectionOptions;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use League\Flysystem\UnixVisibility\PortableVisibilityConverter;
 use League\Flysystem\PhpseclibV3\SftpAdapter;
 use League\Flysystem\PhpseclibV3\SftpConnectionProvider;
 use League\Flysystem\WebDAV\WebDAVAdapter;
@@ -70,7 +71,7 @@ use OSS\OssClient;
 class ImageService
 {
     /**
-     * @param  Request  $request
+     * @param Request $request
      * @return Image
      * @throws UploadException
      */
@@ -87,7 +88,7 @@ class ImageService
         $user = $request->user();
 
         /** @var Group $group */
-        $group = ! is_null($user) ? $user->group : Group::query()->where('is_guest', true)->first();
+        $group = !is_null($user) ? $user->group : Group::query()->where('is_guest', true)->first();
         // 组配置
         $configs = $group->configs;
         // 储存策略
@@ -98,7 +99,7 @@ class ImageService
 
         $extension = strtolower($file->getClientOriginalExtension());
 
-        if (! in_array($extension, $configs->get(GroupConfigKey::AcceptedFileSuffixes))) {
+        if (!in_array($extension, $configs->get(GroupConfigKey::AcceptedFileSuffixes))) {
             throw new UploadException('不支持的文件类型');
         }
 
@@ -112,7 +113,7 @@ class ImageService
         $image->permission = ImagePermission::Private;
 
         if ($request->has('strategy_id')) {
-            if (! $strategy = $strategies->find($request->input('strategy_id'))) {
+            if (!$strategy = $strategies->find($request->input('strategy_id'))) {
                 throw new UploadException('选定的策略不存在');
             }
         } else {
@@ -123,8 +124,8 @@ class ImageService
         $image->strategy_id = $strategy->id;
 
         // 默认储存策略
-        if (! is_null($user)) {
-            if (Utils::config(ConfigKey::IsUserNeedVerify) && ! $user->email_verified_at) {
+        if (!is_null($user)) {
+            if (Utils::config(ConfigKey::IsUserNeedVerify) && !$user->email_verified_at) {
                 throw new UploadException('账户未验证');
             }
 
@@ -152,7 +153,7 @@ class ImageService
         $this->rateLimiter($configs, $request);
 
         // 图片处理，跳过 ico 于 gif
-        if (! in_array($extension, ['ico', 'gif'])) {
+        if (!in_array($extension, ['ico', 'gif'])) {
             // 图片保存质量与格式
             $quality = $configs->get(GroupConfigKey::ImageSaveQuality, 75);
             $format = $configs->get(GroupConfigKey::ImageSaveFormat);
@@ -180,9 +181,9 @@ class ImageService
         }
 
         $filename = $this->replacePathname(
-            $configs->get(GroupConfigKey::PathNamingRule).'/'.$configs->get(GroupConfigKey::FileNamingRule), $file,
+            $configs->get(GroupConfigKey::PathNamingRule) . '/' . $configs->get(GroupConfigKey::FileNamingRule), $file,
         );
-        $pathname = $filename.".{$extension}";
+        $pathname = $filename . ".{$extension}";
 
         [$width, $height] = @getimagesize($file->getRealPath()) ?: [400, 400];
 
@@ -224,10 +225,10 @@ class ImageService
         // 增加当前用户的图片数量和相册图片数量
         $updateNum = function ($method) use ($user, $image) {
             DB::transaction(function () use ($method, $user, $image) {
-                if (! is_null($user)) {
+                if (!is_null($user)) {
                     $user->{$method}('image_num');
                 }
-                if (! is_null($image->album)) {
+                if (!is_null($image->album)) {
                     $image->album->{$method}('image_num');
                 }
             });
@@ -235,7 +236,7 @@ class ImageService
 
         try {
             // 图片记录保存失败，删除物理文件
-            if (! $image->save()) {
+            if (!$image->save()) {
                 if (is_null($existing)) $filesystem->delete($image->pathname);
                 throw new \Exception('图片记录保存失败');
             }
@@ -246,7 +247,7 @@ class ImageService
         }
 
         // 图片检测，跳过 tif、ico 以及 psd 格式
-        if ($configs->get(GroupConfigKey::IsEnableScan) && ! in_array($extension, ['psd', 'ico', 'tif'])) {
+        if ($configs->get(GroupConfigKey::IsEnableScan) && !in_array($extension, ['psd', 'ico', 'tif'])) {
             $scanConfigs = $configs->get(GroupConfigKey::ScanConfigs);
             if ($this->scan(
                 driver: $scanConfigs['driver'],
@@ -277,12 +278,22 @@ class ImageService
         $configs = $strategy->configs;
         return match ($strategy->key) {
             StrategyKey::Local => new LocalFilesystemAdapter(
-                location: $configs->get(LocalOption::Root) ?: config('filesystems.disks.uploads.root')
+                location: $configs->get(LocalOption::Root) ?: config('filesystems.disks.uploads.root'),
+                visibility: PortableVisibilityConverter::fromArray([
+                    'file' => [
+                        'public' => 0711,
+                        'private' => 0711,
+                    ],
+                    'dir' => [
+                        'public' => 0711,
+                        'private' => 0711,
+                    ],
+                ]),
             ),
             StrategyKey::S3 => new AwsS3V3Adapter(
                 client: new S3Client([
                     'credentials' => [
-                        'key'    => $configs->get(S3Option::AccessKeyId),
+                        'key' => $configs->get(S3Option::AccessKeyId),
                         'secret' => $configs->get(S3Option::SecretAccessKey)
                     ],
                     'endpoint' => $configs->get(S3Option::Endpoint),
@@ -347,7 +358,7 @@ class ImageService
             StrategyKey::Minio => new AwsS3V3Adapter(
                 client: new S3Client([
                     'credentials' => [
-                        'key'    => $configs->get(MinioOption::AccessKey),
+                        'key' => $configs->get(MinioOption::AccessKey),
                         'secret' => $configs->get(MinioOption::SecretKey)
                     ],
                     'endpoint' => $configs->get(MinioOption::Endpoint),
@@ -380,7 +391,7 @@ class ImageService
             $value = $configs->get($item['key'], 0);
             $count = Image::query()->whereBetween('created_at', [
                 $carbon->parse("-1 {$key}"), $carbon,
-            ])->when(! is_null($user), function (Builder $builder) use ($user) {
+            ])->when(!is_null($user), function (Builder $builder) use ($user) {
                 $builder->where('user_id', $user->id);
             }, function (Builder $builder) use ($request) {
                 $builder->where('uploaded_ip', $request->ip())->whereNull('user_id');
@@ -396,9 +407,9 @@ class ImageService
      * 检测图片是否违规
      *
      * @param $driver
-     * @param  Collection  $configs
-     * @param  Image  $image
-     * @param  UploadedFile $file
+     * @param Collection $configs
+     * @param Image $image
+     * @param UploadedFile $file
      * @return bool true=违规
      * @throws UploadException
      */
@@ -486,7 +497,7 @@ class ImageService
                 }
             }
         } catch (\Throwable $e) {
-            throw new UploadException('Scan: '.$e->getMessage());
+            throw new UploadException('Scan: ' . $e->getMessage());
         }
 
         return $flag;
@@ -495,8 +506,8 @@ class ImageService
     /**
      * 合成水印
      *
-     * @param  mixed  $image
-     * @param  Collection  $configs
+     * @param mixed $image
+     * @param Collection $configs
      * @return \Intervention\Image\Image
      */
     public function stickWatermark(mixed $image, Collection $configs): \Intervention\Image\Image
@@ -506,8 +517,8 @@ class ImageService
         $image = InterventionImage::make($image);
 
         $position = $options->get(FontOption::Position, 'bottom-right');
-        $offsetX = (int) $options->get(FontOption::X, 10);
-        $offsetY = (int) $options->get(FontOption::Y, 10);
+        $offsetX = (int)$options->get(FontOption::X, 10);
+        $offsetY = (int)$options->get(FontOption::Y, 10);
 
         $watermark = $this->getWatermark($driver, $options);
 
@@ -548,10 +559,10 @@ class ImageService
     {
         $pathname = public_path($image->getThumbnailPathname());
 
-        if (! file_exists($pathname) || $force) {
+        if (!file_exists($pathname) || $force) {
             try {
                 // 创建文件夹
-                if (! is_dir(dirname($pathname))) {
+                if (!is_dir(dirname($pathname))) {
                     @mkdir(dirname($pathname));
                 }
 
@@ -564,7 +575,7 @@ class ImageService
 
                 if ($w > $max && $h > $max) {
                     $scale = min($max / $w, $max / $h);
-                    $width  = (int)($w * $scale);
+                    $width = (int)($w * $scale);
                     $height = (int)($h * $scale);
                 }
 
@@ -579,8 +590,8 @@ class ImageService
     /**
      * 获取水印画布
      *
-     * @param  string  $driver
-     * @param  Collection  $options
+     * @param string $driver
+     * @param Collection $options
      * @return \Intervention\Image\Image
      */
     private function getWatermark(string $driver, Collection $options): \Intervention\Image\Image
@@ -588,14 +599,14 @@ class ImageService
         $manager = new ImageManager(config('image'));
 
         if ($driver === 'image') {
-            $watermark = $manager->make(storage_path('app/public/'.trim($options->get(ImageOption::Image), '/')));
-            $opacity = (int) $options->get(ImageOption::Opacity, 0);
-            $rotate = (int) $options->get(ImageOption::Rotate, 0);
+            $watermark = $manager->make(storage_path('app/public/' . trim($options->get(ImageOption::Image), '/')));
+            $opacity = (int)$options->get(ImageOption::Opacity, 0);
+            $rotate = (int)$options->get(ImageOption::Rotate, 0);
             $width = $options->get(ImageOption::Width, 0);
             $height = $options->get(ImageOption::Height, 0);
 
             if ($opacity && $opacity != 100) {
-                $watermark->opacity((int) min($opacity, 100));
+                $watermark->opacity((int)min($opacity, 100));
             }
 
             if ($rotate) {
@@ -613,9 +624,9 @@ class ImageService
             $text = $options->get(FontOption::Text, Utils::config(ConfigKey::AppName));
             $font = new Font(urldecode($text));
             $font->valign('top')
-                ->file(storage_path('app/public/'.trim($options->get(FontOption::Font), '/')))
-                ->size((int) $options->get(FontOption::Size, 50))
-                ->angle((int) $options->get(FontOption::Angle, 0))
+                ->file(storage_path('app/public/' . trim($options->get(FontOption::Font), '/')))
+                ->size((int)$options->get(FontOption::Size, 50))
+                ->angle((int)$options->get(FontOption::Angle, 0))
                 ->color($options->get(FontOption::Color, '000000')); // 十六进制 or rgba
             $box = $font->getBoxSize();
             $canvas = $manager->canvas($box['width'], $box['height']);
@@ -633,11 +644,11 @@ class ImageService
             '{d}' => date('d'),
             '{timestamp}' => time(),
             '{uniqid}' => uniqid(),
-            '{md5}' => md5(microtime().Str::random()),
-            '{md5-16}' => substr(md5(microtime().Str::random()), 0, 16),
+            '{md5}' => md5(microtime() . Str::random()),
+            '{md5-16}' => substr(md5(microtime() . Str::random()), 0, 16),
             '{str-random-16}' => Str::random(),
             '{str-random-10}' => Str::random(10),
-            '{filename}' => Str::replaceLast('.'.$file->getClientOriginalExtension(), '', $file->getClientOriginalName()),
+            '{filename}' => Str::replaceLast('.' . $file->getClientOriginalExtension(), '', $file->getClientOriginalName()),
             '{uid}' => Auth::check() ? Auth::id() : 0,
         ];
         return str_replace(array_keys($array), array_values($array), $pathname);
